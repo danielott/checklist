@@ -8,21 +8,35 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <main class="app">
-      <h1>Checklist</h1>
-      <form id="new-item-form" autocomplete="off">
-        <input
-          id="new-item-input"
-          type="text"
-          placeholder="Add an item…"
-          aria-label="New checklist item"
-          required
-        />
-        <button type="submit" aria-label="Add item">+</button>
-      </form>
-      <ul id="item-list" aria-label="Checklist items"></ul>
-      <p id="empty-state" hidden>Nothing here yet. Add your first item above.</p>
-    </main>
+    <header class="topbar">
+      <button id="sidebar-toggle" type="button" aria-label="Toggle sidebar">☰</button>
+      <h1 id="current-list-name">Checklist</h1>
+    </header>
+    <div class="layout">
+      <aside id="sidebar" aria-label="Checklists">
+        <div class="sidebar-header">
+          <h2>Checklists</h2>
+          <button id="add-root-list" type="button" aria-label="Add checklist" title="Add checklist">＋</button>
+        </div>
+        <nav id="tree" aria-label="Checklist tree"></nav>
+      </aside>
+      <div id="backdrop"></div>
+      <main class="app">
+        <form id="new-item-form" autocomplete="off">
+          <input
+            id="new-item-input"
+            type="text"
+            placeholder="Add an item…"
+            aria-label="New checklist item"
+            required
+          />
+          <button type="submit" aria-label="Add item">+</button>
+        </form>
+        <ul id="item-list" aria-label="Checklist items"></ul>
+        <p id="empty-state" class="hint" hidden>Nothing here yet. Add your first item above.</p>
+        <p id="no-list-state" class="hint" hidden>Create a checklist in the sidebar to get started.</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -4,6 +4,7 @@
   --text: #1c1e21;
   --muted: #7a7f87;
   --accent: #1a73e8;
+  --accent-soft: #e8f0fe;
   --border: #e2e5e9;
   --danger: #d93025;
 }
@@ -15,6 +16,7 @@
     --text: #e8eaed;
     --muted: #9aa0a6;
     --accent: #8ab4f8;
+    --accent-soft: #2b3648;
     --border: #33373e;
     --danger: #f28b82;
   }
@@ -34,16 +36,223 @@ body {
     env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
+/* --- Top bar --- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.topbar h1 {
+  font-size: 1.2rem;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#sidebar-toggle {
+  font-size: 1.2rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.4rem;
+}
+
+#sidebar-toggle:hover {
+  background: var(--accent-soft);
+}
+
+/* --- Layout --- */
+
+.layout {
+  display: flex;
+  align-items: stretch;
+}
+
+#sidebar {
+  width: 17rem;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 0.75rem;
+  min-height: calc(100dvh - 3.2rem);
+}
+
+body.sidebar-collapsed #sidebar {
+  display: none;
+}
+
+#backdrop {
+  display: none;
+}
+
 .app {
+  flex: 1;
+  min-width: 0;
   max-width: 32rem;
   margin: 0 auto;
   padding: 1.5rem 1rem;
 }
 
-h1 {
-  font-size: 1.5rem;
-  margin: 0 0 1rem;
+/* Mobile: sidebar becomes a closed-by-default overlay. */
+@media (max-width: 768px) {
+  #sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(80vw, 18rem);
+    min-height: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    overflow-y: auto;
+    display: block;
+  }
+
+  body.sidebar-open #sidebar {
+    transform: none;
+    box-shadow: 0 0 2rem rgba(0, 0, 0, 0.35);
+  }
+
+  body.sidebar-open #backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.4);
+  }
 }
+
+/* --- Sidebar tree --- */
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.sidebar-header h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0;
+  padding-left: 0.4rem;
+}
+
+#add-root-list {
+  font-size: 1.1rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.4rem;
+}
+
+#add-root-list:hover {
+  background: var(--accent-soft);
+}
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree .tree {
+  padding-left: 1rem;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  border-radius: 0.4rem;
+  padding-right: 0.15rem;
+}
+
+.tree-row.selected {
+  background: var(--accent-soft);
+}
+
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.45rem 0.4rem;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-row.selected .tree-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tree-action {
+  font-size: 0.95rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.35rem 0.3rem;
+  border-radius: 0.3rem;
+  flex-shrink: 0;
+  visibility: hidden;
+}
+
+.tree-row:hover .tree-action,
+.tree-row:focus-within .tree-action,
+.tree-row.selected .tree-action {
+  visibility: visible;
+}
+
+/* Touch screens have no hover; keep actions visible. */
+@media (hover: none) {
+  .tree-action {
+    visibility: visible;
+  }
+}
+
+.tree-action:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tree-rename {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.4rem;
+  margin: 0.05rem 0;
+}
+
+/* --- Main checklist --- */
 
 #new-item-form {
   display: flex;
@@ -53,6 +262,7 @@ h1 {
 
 #new-item-input {
   flex: 1;
+  min-width: 0;
   font: inherit;
   color: inherit;
   background: var(--surface);
@@ -136,7 +346,7 @@ h1 {
   color: var(--danger);
 }
 
-#empty-state {
+.hint {
   color: var(--muted);
   text-align: center;
   margin-top: 2rem;
