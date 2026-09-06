@@ -540,8 +540,19 @@ function finishDrag(spot: DropSpot | null): void {
 
 // Desktop: native HTML5 drag and drop.
 
+// dragstart's target is the draggable form itself, so remember where the
+// press began: drags starting on the chevron buttons must stay clicks.
+let suppressFormDrag = false;
+form.addEventListener('mousedown', (event) => {
+  suppressFormDrag = !!(event.target as Element).closest?.('button');
+});
+
 itemList.addEventListener('dragstart', (event) => {
   if ((event.target as Element).closest?.('#new-item-form')) {
+    if (suppressFormDrag) {
+      event.preventDefault();
+      return;
+    }
     const list = selectedList();
     if (!list || !event.dataTransfer) return;
     beginFormDrag(list, event.clientX);
