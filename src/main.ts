@@ -18,6 +18,8 @@ const backdrop = document.getElementById('backdrop') as HTMLDivElement;
 const currentListName = document.getElementById('current-list-name') as HTMLHeadingElement;
 const form = document.getElementById('new-item-form') as HTMLFormElement;
 const input = document.getElementById('new-item-input') as HTMLInputElement;
+const outdentButton = document.getElementById('outdent-button') as HTMLButtonElement;
+const indentButton = document.getElementById('indent-button') as HTMLButtonElement;
 const itemList = document.getElementById('item-list') as HTMLUListElement;
 const emptyState = document.getElementById('empty-state') as HTMLParagraphElement;
 const noListState = document.getElementById('no-list-state') as HTMLParagraphElement;
@@ -27,6 +29,10 @@ const mobileQuery = window.matchMedia('(max-width: 768px)');
 const state: AppState = loadState();
 let renamingId: string | null = null;
 let addingChildToId: string | null = null;
+
+// Nesting level for the add-item form, relative to the list's root (0).
+// null means "same level as the item visually above the form".
+let addLevel: number | null = null;
 
 function selectedList(): Checklist | null {
   return state.selectedId ? findChecklist(state, state.selectedId) : null;
@@ -107,6 +113,7 @@ function buildListRow(list: Checklist): HTMLDivElement {
   name.textContent = list.name;
   name.addEventListener('click', () => {
     state.selectedId = list.id;
+    addLevel = null;
     closeMobileSidebar();
     persistAndRender();
   });
@@ -173,6 +180,34 @@ function deleteList(list: Checklist): void {
 
 // --- Items in the selected checklist ---
 
+// The chain of "last items" from the root down: the item visually above the
+// add form is the last element; each level of the chain is a valid parent
+// for the new item.
+function lastItemChain(list: Checklist): Item[] {
+  const chain: Item[] = [];
+  let items = list.items;
+  while (items.length > 0) {
+    const last = items[items.length - 1];
+    chain.push(last);
+    items = last.children;
+  }
+  return chain;
+}
+
+function currentAddLevel(list: Checklist): number {
+  const maxLevel = lastItemChain(list).length;
+  const defaultLevel = Math.max(0, maxLevel - 1);
+  return Math.min(Math.max(addLevel ?? defaultLevel, 0), maxLevel);
+}
+
+function changeAddLevel(delta: number): void {
+  const list = selectedList();
+  if (!list) return;
+  addLevel = currentAddLevel(list) + delta;
+  renderMain();
+  input.focus();
+}
+
 function renderMain(): void {
   const list = selectedList();
   currentListName.textContent = list ? list.name : 'Checklist';
@@ -185,6 +220,11 @@ function renderMain(): void {
   }
   itemList.replaceChildren(...list.items.map((item) => renderItem(list.items, item)));
   emptyState.hidden = list.items.length > 0;
+
+  const level = currentAddLevel(list);
+  form.style.marginLeft = `${level * 1.5}rem`;
+  outdentButton.disabled = level === 0;
+  indentButton.disabled = level >= lastItemChain(list).length;
 }
 
 function renderItem(siblings: Item[], item: Item): HTMLLIElement {
@@ -301,9 +341,22 @@ form.addEventListener('submit', (event) => {
   const list = selectedList();
   const text = input.value.trim();
   if (!list || !text) return;
-  list.items.push(createItem(text));
+  const level = currentAddLevel(list);
+  const chain = lastItemChain(list);
+  const siblings = level === 0 ? list.items : chain[level - 1].children;
+  siblings.push(createItem(text));
+  addLevel = level;
   input.value = '';
   persistAndRender();
+});
+
+outdentButton.addEventListener('click', () => changeAddLevel(-1));
+indentButton.addEventListener('click', () => changeAddLevel(1));
+
+input.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab') return;
+  event.preventDefault();
+  changeAddLevel(event.shiftKey ? -1 : 1);
 });
 
 if (!selectedList()) {
