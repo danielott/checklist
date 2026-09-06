@@ -375,14 +375,18 @@ interface DropSpot {
   above: FlatRow | null; // row visually above the gap, outside the dragged subtree
 }
 
-function computeDropSpot(list: Checklist, event: DragEvent): DropSpot | null {
+function computeDropSpot(
+  list: Checklist,
+  li: HTMLLIElement | null,
+  clientX: number,
+  clientY: number,
+): DropSpot | null {
   const rows = flattenItems(list.items);
   const dragged = rows.find((r) => r.item.id === draggingId);
   if (!dragged) return null;
   const subtree = new Set<string>();
   collectIds(dragged.item, subtree);
 
-  const li = dropTargetLi(event);
   let gap: number; // insertion point between visual rows [gap-1] and [gap]
   let before = false;
   let liDepth = 0;
@@ -393,7 +397,7 @@ function computeDropSpot(list: Checklist, event: DragEvent): DropSpot | null {
     const rect = (li.firstElementChild as HTMLElement).getBoundingClientRect();
     // Only the top third of a row targets the gap above it; hovering the rest
     // of the row targets the gap below, where nesting into the row is allowed.
-    before = event.clientY < rect.top + rect.height / 3;
+    before = clientY < rect.top + rect.height / 3;
     gap = before ? targetIndex : targetIndex + 1;
   } else {
     gap = rows.length; // hovering the empty space below the list
@@ -421,7 +425,7 @@ function computeDropSpot(list: Checklist, event: DragEvent): DropSpot | null {
   // Depth follows how far the cursor moved horizontally since the drag began,
   // starting from the item's original depth.
   const indentPx = INDENT_REM * parseFloat(getComputedStyle(document.documentElement).fontSize);
-  const cursorDepth = dragStartDepth + Math.round((event.clientX - dragStartX) / indentPx);
+  const cursorDepth = dragStartDepth + Math.round((clientX - dragStartX) / indentPx);
   const depth = Math.min(Math.max(cursorDepth, minDepth), maxDepth);
 
   return { li, liDepth, before, depth, above };
@@ -441,18 +445,44 @@ function moveItem(list: Checklist, dragged: FlatRow, spot: DropSpot): void {
   persistAndRender();
 }
 
-itemList.addEventListener('dragstart', (event) => {
-  const li = dropTargetLi(event);
-  if (!li || !event.dataTransfer) return;
+function beginDrag(li: HTMLLIElement, startX: number): void {
   draggingId = li.dataset.id!;
-  dragStartX = event.clientX;
+  dragStartX = startX;
   const list = selectedList();
   dragStartDepth = list
     ? (flattenItems(list.items).find((r) => r.item.id === draggingId)?.depth ?? 0)
     : 0;
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', draggingId);
   (li.firstElementChild as HTMLElement).classList.add('dragging');
+}
+
+function showDropIndicator(spot: DropSpot): void {
+  clearDropIndicator();
+  if (!spot.li) return;
+  const row = spot.li.firstElementChild as HTMLElement;
+  row.style.setProperty('--indent-delta', `${(spot.depth - spot.liDepth) * INDENT_REM}rem`);
+  spot.li.classList.add(spot.before ? 'drop-before' : 'drop-after');
+  indicatorLi = spot.li;
+}
+
+function finishDrag(spot: DropSpot | null): void {
+  clearDropIndicator();
+  const list = selectedList();
+  if (list && draggingId && spot) {
+    const dragged = flattenItems(list.items).find((r) => r.item.id === draggingId);
+    if (dragged) moveItem(list, dragged, spot);
+  }
+  draggingId = null;
+  itemList.querySelector('.dragging')?.classList.remove('dragging');
+}
+
+// Desktop: native HTML5 drag and drop.
+
+itemList.addEventListener('dragstart', (event) => {
+  const li = dropTargetLi(event);
+  if (!li || !event.dataTransfer) return;
+  beginDrag(li, event.clientX);
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggingId!);
 });
 
 itemList.addEventListener('dragover', (event) => {
@@ -460,24 +490,16 @@ itemList.addEventListener('dragover', (event) => {
   if (!list || !draggingId) return;
   event.preventDefault();
   event.dataTransfer!.dropEffect = 'move';
+  const spot = computeDropSpot(list, dropTargetLi(event), event.clientX, event.clientY);
   clearDropIndicator();
-  const spot = computeDropSpot(list, event);
-  if (!spot?.li) return;
-  const row = spot.li.firstElementChild as HTMLElement;
-  row.style.setProperty('--indent-delta', `${(spot.depth - spot.liDepth) * INDENT_REM}rem`);
-  spot.li.classList.add(spot.before ? 'drop-before' : 'drop-after');
-  indicatorLi = spot.li;
+  if (spot) showDropIndicator(spot);
 });
 
 itemList.addEventListener('drop', (event) => {
   event.preventDefault();
-  clearDropIndicator();
   const list = selectedList();
   if (!list || !draggingId) return;
-  const spot = computeDropSpot(list, event);
-  const dragged = flattenItems(list.items).find((r) => r.item.id === draggingId);
-  draggingId = null;
-  if (spot && dragged) moveItem(list, dragged, spot);
+  finishDrag(computeDropSpot(list, dropTargetLi(event), event.clientX, event.clientY));
 });
 
 itemList.addEventListener('dragend', () => {
@@ -485,6 +507,96 @@ itemList.addEventListener('dragend', () => {
   clearDropIndicator();
   itemList.querySelector('.dragging')?.classList.remove('dragging');
 });
+
+// Touch: HTML5 drag events don't fire on mobile, so long-press to lift an
+// item, then move the finger to place it. A quick swipe still scrolls.
+
+const LONG_PRESS_MS = 100;
+const SCROLL_SLOP_PX = 8;
+
+let touchTimer: number | null = null;
+let touchDragging = false;
+let touchStartX = 0;
+let touchStartY = 0;
+let touchSpot: DropSpot | null = null;
+
+function cancelTouchDrag(): void {
+  if (touchTimer !== null) {
+    clearTimeout(touchTimer);
+    touchTimer = null;
+  }
+  if (touchDragging) {
+    touchDragging = false;
+    touchSpot = null;
+    draggingId = null;
+    clearDropIndicator();
+    itemList.querySelector('.dragging')?.classList.remove('dragging');
+  }
+}
+
+itemList.addEventListener(
+  'touchstart',
+  (event) => {
+    if (event.touches.length !== 1) return;
+    const target = event.target as Element;
+    if (target.closest?.('input, button')) return;
+    const li = target.closest?.('li[data-id]') as HTMLLIElement | null;
+    if (!li) return;
+    const touch = event.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchTimer = window.setTimeout(() => {
+      touchTimer = null;
+      touchDragging = true;
+      touchSpot = null;
+      beginDrag(li, touchStartX);
+      navigator.vibrate?.(10);
+    }, LONG_PRESS_MS);
+  },
+  { passive: true },
+);
+
+itemList.addEventListener(
+  'touchmove',
+  (event) => {
+    const touch = event.touches[0];
+    if (!touchDragging) {
+      // Finger moved before the long press fired: it's a scroll, not a drag.
+      if (
+        touchTimer !== null &&
+        (Math.abs(touch.clientX - touchStartX) > SCROLL_SLOP_PX ||
+          Math.abs(touch.clientY - touchStartY) > SCROLL_SLOP_PX)
+      ) {
+        clearTimeout(touchTimer);
+        touchTimer = null;
+      }
+      return;
+    }
+    event.preventDefault(); // keep the viewport from scrolling while dragging
+    const list = selectedList();
+    if (!list) return;
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const li = (el?.closest?.('li[data-id]') as HTMLLIElement) ?? null;
+    touchSpot = computeDropSpot(list, li, touch.clientX, touch.clientY);
+    clearDropIndicator();
+    if (touchSpot) showDropIndicator(touchSpot);
+  },
+  { passive: false },
+);
+
+itemList.addEventListener('touchend', () => {
+  if (touchTimer !== null) {
+    clearTimeout(touchTimer);
+    touchTimer = null;
+  }
+  if (!touchDragging) return;
+  touchDragging = false;
+  const spot = touchSpot;
+  touchSpot = null;
+  finishDrag(spot);
+});
+
+itemList.addEventListener('touchcancel', cancelTouchDrag);
 
 // --- Wiring ---
 
