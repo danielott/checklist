@@ -287,7 +287,8 @@ body.sidebar-collapsed #sidebar {
   cursor: pointer;
 }
 
-#item-list {
+#item-list,
+#item-list ul {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -296,7 +297,17 @@ body.sidebar-collapsed #sidebar {
   gap: 0.5rem;
 }
 
+/* Nested sub-items are indented under their parent row. */
+#item-list ul {
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+}
+
 #item-list li {
+  display: block;
+}
+
+.item-row {
   display: flex;
   align-items: center;
   background: var(--surface);
@@ -326,12 +337,40 @@ body.sidebar-collapsed #sidebar {
   overflow-wrap: anywhere;
 }
 
-#item-list li.checked span {
+.item-row.checked span {
   text-decoration: line-through;
   color: var(--muted);
 }
 
+.add-child {
+  font-size: 1rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.5rem 0.4rem;
+  border-radius: 0.4rem;
+  flex-shrink: 0;
+}
+
+.add-child:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.add-child-input {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
 .delete {
+  flex-shrink: 0;
   font-size: 1.3rem;
   line-height: 1;
   background: none;

@@ -3,6 +3,7 @@ import {
   saveState,
   createChecklist,
   createItem,
+  countItemDescendants,
   findChecklist,
   removeChecklist,
   type AppState,
@@ -25,6 +26,7 @@ const mobileQuery = window.matchMedia('(max-width: 768px)');
 
 const state: AppState = loadState();
 let renamingId: string | null = null;
+let addingChildToId: string | null = null;
 
 function selectedList(): Checklist | null {
   return state.selectedId ? findChecklist(state, state.selectedId) : null;
@@ -181,13 +183,16 @@ function renderMain(): void {
     emptyState.hidden = true;
     return;
   }
-  itemList.replaceChildren(...list.items.map((item) => renderItem(list, item)));
+  itemList.replaceChildren(...list.items.map((item) => renderItem(list.items, item)));
   emptyState.hidden = list.items.length > 0;
 }
 
-function renderItem(list: Checklist, item: Item): HTMLLIElement {
+function renderItem(siblings: Item[], item: Item): HTMLLIElement {
   const li = document.createElement('li');
-  li.classList.toggle('checked', item.checked);
+
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.classList.toggle('checked', item.checked);
 
   const label = document.createElement('label');
 
@@ -204,18 +209,81 @@ function renderItem(list: Checklist, item: Item): HTMLLIElement {
 
   label.append(checkbox, text);
 
+  const addChildButton = document.createElement('button');
+  addChildButton.type = 'button';
+  addChildButton.className = 'add-child';
+  addChildButton.textContent = '＋';
+  addChildButton.title = `Add sub-item to "${item.text}"`;
+  addChildButton.setAttribute('aria-label', `Add sub-item to "${item.text}"`);
+  addChildButton.addEventListener('click', () => {
+    addingChildToId = item.id;
+    render();
+  });
+
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';
   deleteButton.className = 'delete';
   deleteButton.textContent = '×';
   deleteButton.setAttribute('aria-label', `Delete "${item.text}"`);
   deleteButton.addEventListener('click', () => {
-    list.items = list.items.filter((i) => i.id !== item.id);
+    const descendants = countItemDescendants(item);
+    if (
+      descendants > 0 &&
+      !window.confirm(`Delete "${item.text}" and its ${descendants} sub-item(s)?`)
+    ) {
+      return;
+    }
+    siblings.splice(siblings.indexOf(item), 1);
     persistAndRender();
   });
 
-  li.append(label, deleteButton);
+  row.append(label, addChildButton, deleteButton);
+  li.append(row);
+
+  if (item.children.length > 0 || addingChildToId === item.id) {
+    const ul = document.createElement('ul');
+    ul.append(...item.children.map((child) => renderItem(item.children, child)));
+    if (addingChildToId === item.id) {
+      const addLi = document.createElement('li');
+      addLi.append(buildAddChildInput(item));
+      ul.append(addLi);
+    }
+    li.append(ul);
+  }
   return li;
+}
+
+function buildAddChildInput(item: Item): HTMLInputElement {
+  const childInput = document.createElement('input');
+  childInput.type = 'text';
+  childInput.className = 'add-child-input';
+  childInput.placeholder = 'Add a sub-item…';
+  childInput.setAttribute('aria-label', `New sub-item of "${item.text}"`);
+
+  let done = false;
+  const commit = (): void => {
+    if (done) return;
+    done = true;
+    const text = childInput.value.trim();
+    addingChildToId = null;
+    if (text) item.children.push(createItem(text));
+    persistAndRender();
+  };
+  childInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+    }
+    if (event.key === 'Escape') {
+      done = true;
+      addingChildToId = null;
+      render();
+    }
+  });
+  childInput.addEventListener('blur', commit);
+
+  requestAnimationFrame(() => childInput.focus());
+  return childInput;
 }
 
 // --- Wiring ---

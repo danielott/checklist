@@ -7,6 +7,7 @@ export interface Item {
   text: string;
   checked: boolean;
   createdAt: number;
+  children: Item[];
 }
 
 export interface Checklist {
@@ -52,13 +53,13 @@ export function loadState(): AppState {
         (empty) =>
           (state.categories as Category[]).find((c) => c && c.name === empty.name) ?? empty,
       );
-      return { categories, selectedId: state.selectedId ?? null };
+      return normalize({ categories, selectedId: state.selectedId ?? null });
     }
     if (Array.isArray(state.lists)) {
       // Previous tree-of-checklists shape: flatten everything into Ongoing.
       const categories = emptyCategories();
       categories[0].lists = flattenTree(state.lists as TreeChecklist[]);
-      return { categories, selectedId: state.selectedId ?? null };
+      return normalize({ categories, selectedId: state.selectedId ?? null });
     }
   }
 
@@ -80,7 +81,21 @@ export function loadState(): AppState {
     categories[0].lists.push(first);
     selectedId = first.id;
   }
-  return { categories, selectedId };
+  return normalize({ categories, selectedId });
+}
+
+// Items saved by older versions have no children array; fill it in.
+function normalize(state: AppState): AppState {
+  for (const category of state.categories) {
+    for (const list of category.lists) {
+      list.items = normalizeItems(list.items ?? []);
+    }
+  }
+  return state;
+}
+
+function normalizeItems(items: Item[]): Item[] {
+  return items.map((item) => ({ ...item, children: normalizeItems(item.children ?? []) }));
 }
 
 interface TreeChecklist extends Checklist {
@@ -110,7 +125,12 @@ export function createItem(text: string): Item {
     text,
     checked: false,
     createdAt: Date.now(),
+    children: [],
   };
+}
+
+export function countItemDescendants(item: Item): number {
+  return item.children.reduce((sum, child) => sum + 1 + countItemDescendants(child), 0);
 }
 
 export function findChecklist(state: AppState, id: string): Checklist | null {
