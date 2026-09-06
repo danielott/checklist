@@ -263,7 +263,7 @@ body.sidebar-collapsed #sidebar {
 
 #outdent-button,
 #indent-button {
-  font-size: 0.9rem;
+  font-size: 1.15rem;
   line-height: 1;
   background: none;
   border: none;
@@ -362,6 +362,18 @@ body.sidebar-collapsed #sidebar {
 
 #item-list span {
   overflow-wrap: anywhere;
+}
+
+.item-row.dragging {
+  opacity: 0.5;
+}
+
+li.drop-before > .item-row {
+  box-shadow: 0 -3px 0 0 var(--accent);
+}
+
+li.drop-after > .item-row {
+  box-shadow: 0 3px 0 0 var(--accent);
 }
 
 .item-row.checked span {

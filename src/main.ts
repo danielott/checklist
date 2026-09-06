@@ -229,10 +229,12 @@ function renderMain(): void {
 
 function renderItem(siblings: Item[], item: Item): HTMLLIElement {
   const li = document.createElement('li');
+  li.dataset.id = item.id;
 
   const row = document.createElement('div');
   row.className = 'item-row';
   row.classList.toggle('checked', item.checked);
+  row.draggable = true;
 
   const label = document.createElement('label');
 
@@ -325,6 +327,119 @@ function buildAddChildInput(item: Item): HTMLInputElement {
   requestAnimationFrame(() => childInput.focus());
   return childInput;
 }
+
+// --- Drag and drop reordering ---
+
+interface FlatRow {
+  item: Item;
+  siblings: Item[];
+}
+
+// All items in visual (depth-first) order, each with the array it lives in.
+function flattenItems(items: Item[], out: FlatRow[] = []): FlatRow[] {
+  for (const item of items) {
+    out.push({ item, siblings: items });
+    flattenItems(item.children, out);
+  }
+  return out;
+}
+
+function collectIds(item: Item, out: Set<string>): void {
+  out.add(item.id);
+  for (const child of item.children) collectIds(child, out);
+}
+
+let draggingId: string | null = null;
+let indicatorLi: HTMLLIElement | null = null;
+
+function clearDropIndicator(): void {
+  indicatorLi?.classList.remove('drop-before', 'drop-after');
+  indicatorLi = null;
+}
+
+function dropTargetLi(event: DragEvent): HTMLLIElement | null {
+  return (event.target as Element).closest?.('li[data-id]') ?? null;
+}
+
+function isBeforeRow(li: HTMLLIElement, clientY: number): boolean {
+  const rect = (li.firstElementChild as HTMLElement).getBoundingClientRect();
+  return clientY < rect.top + rect.height / 2;
+}
+
+function moveItem(list: Checklist, id: string, targetLi: HTMLLIElement | null, clientY: number): void {
+  const rows = flattenItems(list.items);
+  const dragged = rows.find((r) => r.item.id === id);
+  if (!dragged) return;
+
+  const subtree = new Set<string>();
+  collectIds(dragged.item, subtree);
+  if (targetLi && subtree.has(targetLi.dataset.id!)) return; // can't drop into itself
+
+  let gap: number; // insertion point between visual rows [gap-1] and [gap]
+  if (targetLi) {
+    const targetIndex = rows.findIndex((r) => r.item.id === targetLi.dataset.id);
+    if (targetIndex === -1) return;
+    gap = isBeforeRow(targetLi, clientY) ? targetIndex : targetIndex + 1;
+  } else {
+    gap = rows.length; // dropped on empty space below the list
+  }
+
+  // Dropping right next to the dragged row leaves everything as-is.
+  if (rows[gap]?.item.id === id || rows[gap - 1]?.item.id === id) return;
+
+  // The item visually above the drop point (skipping the dragged subtree)
+  // determines both position and depth: the moved item becomes its next sibling.
+  let above: FlatRow | null = null;
+  for (let i = gap - 1; i >= 0; i--) {
+    if (!subtree.has(rows[i].item.id)) {
+      above = rows[i];
+      break;
+    }
+  }
+
+  dragged.siblings.splice(dragged.siblings.indexOf(dragged.item), 1);
+  if (above) {
+    above.siblings.splice(above.siblings.indexOf(above.item) + 1, 0, dragged.item);
+  } else {
+    list.items.unshift(dragged.item);
+  }
+  persistAndRender();
+}
+
+itemList.addEventListener('dragstart', (event) => {
+  const li = dropTargetLi(event);
+  if (!li || !event.dataTransfer) return;
+  draggingId = li.dataset.id!;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggingId);
+  (li.firstElementChild as HTMLElement).classList.add('dragging');
+});
+
+itemList.addEventListener('dragover', (event) => {
+  if (!draggingId) return;
+  event.preventDefault();
+  event.dataTransfer!.dropEffect = 'move';
+  const li = dropTargetLi(event);
+  clearDropIndicator();
+  if (!li || li.dataset.id === draggingId) return;
+  li.classList.add(isBeforeRow(li, event.clientY) ? 'drop-before' : 'drop-after');
+  indicatorLi = li;
+});
+
+itemList.addEventListener('drop', (event) => {
+  event.preventDefault();
+  clearDropIndicator();
+  const list = selectedList();
+  if (!list || !draggingId) return;
+  moveItem(list, draggingId, dropTargetLi(event), event.clientY);
+  draggingId = null;
+});
+
+itemList.addEventListener('dragend', () => {
+  draggingId = null;
+  clearDropIndicator();
+  itemList.querySelector('.dragging')?.classList.remove('dragging');
+});
 
 // --- Wiring ---
 
