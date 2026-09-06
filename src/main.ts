@@ -28,7 +28,6 @@ const mobileQuery = window.matchMedia('(max-width: 768px)');
 
 const state: AppState = loadState();
 let renamingId: string | null = null;
-let addingChildToId: string | null = null;
 let editingItemId: string | null = null;
 
 // Nesting level for the add-item form, relative to the list's root (0).
@@ -261,17 +260,6 @@ function renderItem(siblings: Item[], item: Item): HTMLLIElement {
     text = span;
   }
 
-  const addChildButton = document.createElement('button');
-  addChildButton.type = 'button';
-  addChildButton.className = 'add-child';
-  addChildButton.textContent = '＋';
-  addChildButton.title = `Add sub-item to "${item.text}"`;
-  addChildButton.setAttribute('aria-label', `Add sub-item to "${item.text}"`);
-  addChildButton.addEventListener('click', () => {
-    addingChildToId = item.id;
-    render();
-  });
-
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';
   deleteButton.className = 'delete';
@@ -289,17 +277,12 @@ function renderItem(siblings: Item[], item: Item): HTMLLIElement {
     persistAndRender();
   });
 
-  row.append(checkbox, text, addChildButton, deleteButton);
+  row.append(checkbox, text, deleteButton);
   li.append(row);
 
-  if (item.children.length > 0 || addingChildToId === item.id) {
+  if (item.children.length > 0) {
     const ul = document.createElement('ul');
     ul.append(...item.children.map((child) => renderItem(item.children, child)));
-    if (addingChildToId === item.id) {
-      const addLi = document.createElement('li');
-      addLi.append(buildAddChildInput(item));
-      ul.append(addLi);
-    }
     li.append(ul);
   }
   return li;
@@ -339,39 +322,6 @@ function buildItemEditInput(item: Item): HTMLInputElement {
     editInput.setSelectionRange(editInput.value.length, editInput.value.length);
   });
   return editInput;
-}
-
-function buildAddChildInput(item: Item): HTMLInputElement {
-  const childInput = document.createElement('input');
-  childInput.type = 'text';
-  childInput.className = 'add-child-input';
-  childInput.placeholder = 'Add a sub-item…';
-  childInput.setAttribute('aria-label', `New sub-item of "${item.text}"`);
-
-  let done = false;
-  const commit = (): void => {
-    if (done) return;
-    done = true;
-    const text = childInput.value.trim();
-    addingChildToId = null;
-    if (text) item.children.push(createItem(text));
-    persistAndRender();
-  };
-  childInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commit();
-    }
-    if (event.key === 'Escape') {
-      done = true;
-      addingChildToId = null;
-      render();
-    }
-  });
-  childInput.addEventListener('blur', commit);
-
-  requestAnimationFrame(() => childInput.focus());
-  return childInput;
 }
 
 // --- Drag and drop reordering ---

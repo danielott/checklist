@@ -316,17 +316,6 @@ body.sidebar-collapsed #sidebar {
   outline-offset: -1px;
 }
 
-#new-item-form button[type='submit'] {
-  font-size: 1.4rem;
-  line-height: 1;
-  width: 2.75rem;
-  border: none;
-  border-radius: 0.5rem;
-  background: var(--accent);
-  color: var(--surface);
-  cursor: pointer;
-}
-
 #item-list,
 #item-list ul {
   list-style: none;
@@ -420,33 +409,6 @@ li.drop-after > .item-row::after {
 .item-row.checked span {
   text-decoration: line-through;
   color: var(--muted);
-}
-
-.add-child {
-  font-size: 1rem;
-  line-height: 1;
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 0.5rem 0.4rem;
-  border-radius: 0.4rem;
-  flex-shrink: 0;
-}
-
-.add-child:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.add-child-input {
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  background: var(--surface);
-  border: 1px solid var(--accent);
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
 }
 
 .delete {
