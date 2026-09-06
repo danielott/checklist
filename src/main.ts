@@ -29,6 +29,7 @@ const mobileQuery = window.matchMedia('(max-width: 768px)');
 const state: AppState = loadState();
 let renamingId: string | null = null;
 let addingChildToId: string | null = null;
+let editingItemId: string | null = null;
 
 // Nesting level for the add-item form, relative to the list's root (0).
 // null means "same level as the item visually above the form".
@@ -236,8 +237,6 @@ function renderItem(siblings: Item[], item: Item): HTMLLIElement {
   row.classList.toggle('checked', item.checked);
   row.draggable = true;
 
-  const label = document.createElement('label');
-
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.checked = item.checked;
@@ -246,10 +245,21 @@ function renderItem(siblings: Item[], item: Item): HTMLLIElement {
     persistAndRender();
   });
 
-  const text = document.createElement('span');
-  text.textContent = item.text;
-
-  label.append(checkbox, text);
+  let text: HTMLElement;
+  if (editingItemId === item.id) {
+    row.draggable = false; // so selecting text in the input doesn't start a drag
+    text = buildItemEditInput(item);
+  } else {
+    const span = document.createElement('span');
+    span.className = 'item-text';
+    span.textContent = item.text;
+    span.title = 'Click to edit';
+    span.addEventListener('click', () => {
+      editingItemId = item.id;
+      render();
+    });
+    text = span;
+  }
 
   const addChildButton = document.createElement('button');
   addChildButton.type = 'button';
@@ -279,7 +289,7 @@ function renderItem(siblings: Item[], item: Item): HTMLLIElement {
     persistAndRender();
   });
 
-  row.append(label, addChildButton, deleteButton);
+  row.append(checkbox, text, addChildButton, deleteButton);
   li.append(row);
 
   if (item.children.length > 0 || addingChildToId === item.id) {
@@ -293,6 +303,42 @@ function renderItem(siblings: Item[], item: Item): HTMLLIElement {
     li.append(ul);
   }
   return li;
+}
+
+function buildItemEditInput(item: Item): HTMLInputElement {
+  const editInput = document.createElement('input');
+  editInput.type = 'text';
+  editInput.className = 'item-edit';
+  editInput.value = item.text;
+  editInput.setAttribute('aria-label', 'Edit item text');
+
+  let done = false;
+  const commit = (): void => {
+    if (done) return;
+    done = true;
+    const text = editInput.value.trim();
+    editingItemId = null;
+    if (text) item.text = text;
+    persistAndRender();
+  };
+  editInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+    }
+    if (event.key === 'Escape') {
+      done = true;
+      editingItemId = null;
+      render();
+    }
+  });
+  editInput.addEventListener('blur', commit);
+
+  requestAnimationFrame(() => {
+    editInput.focus();
+    editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+  });
+  return editInput;
 }
 
 function buildAddChildInput(item: Item): HTMLInputElement {
