@@ -263,26 +263,27 @@ body.sidebar-collapsed #sidebar {
 
 #outdent-button,
 #indent-button {
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   line-height: 1;
   background: none;
-  border: 1px solid var(--border);
+  border: none;
   color: var(--muted);
+  opacity: 0.6;
   cursor: pointer;
-  padding: 0 0.55rem;
-  border-radius: 0.5rem;
+  padding: 0 0.15rem;
+  border-radius: 0.3rem;
   flex-shrink: 0;
 }
 
 #outdent-button:hover:enabled,
 #indent-button:hover:enabled {
   color: var(--accent);
-  background: var(--accent-soft);
+  opacity: 1;
 }
 
 #outdent-button:disabled,
 #indent-button:disabled {
-  opacity: 0.35;
+  opacity: 0.2;
   cursor: default;
 }
 
@@ -302,7 +303,7 @@ body.sidebar-collapsed #sidebar {
   outline-offset: -1px;
 }
 
-#new-item-form button {
+#new-item-form button[type='submit'] {
   font-size: 1.4rem;
   line-height: 1;
   width: 2.75rem;
