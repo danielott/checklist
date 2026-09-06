@@ -13,41 +13,87 @@ export interface Checklist {
   id: string;
   name: string;
   items: Item[];
-  children: Checklist[];
+}
+
+export const CATEGORY_NAMES = ['Ongoing', 'Recurring', 'Situational'] as const;
+export type CategoryName = (typeof CATEGORY_NAMES)[number];
+
+export interface Category {
+  name: CategoryName;
+  lists: Checklist[];
 }
 
 export interface AppState {
-  lists: Checklist[];
+  categories: Category[];
   selectedId: string | null;
 }
 
 const STORAGE_KEY = 'checklist-state';
 const LEGACY_KEY = 'checklist-items';
 
+function emptyCategories(): Category[] {
+  return CATEGORY_NAMES.map((name) => ({ name, lists: [] }));
+}
+
 export function loadState(): AppState {
+  let parsed: unknown = null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const state = JSON.parse(raw) as AppState;
-      if (state && Array.isArray(state.lists)) return state;
-    }
+    parsed = raw ? JSON.parse(raw) : null;
   } catch {
-    // fall through to a fresh state
+    parsed = null;
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const state = parsed as Partial<AppState> & { lists?: unknown[] };
+    if (Array.isArray(state.categories)) {
+      // Current shape; make sure all three categories exist.
+      const categories = emptyCategories().map(
+        (empty) =>
+          (state.categories as Category[]).find((c) => c && c.name === empty.name) ?? empty,
+      );
+      return { categories, selectedId: state.selectedId ?? null };
+    }
+    if (Array.isArray(state.lists)) {
+      // Previous tree-of-checklists shape: flatten everything into Ongoing.
+      const categories = emptyCategories();
+      categories[0].lists = flattenTree(state.lists as TreeChecklist[]);
+      return { categories, selectedId: state.selectedId ?? null };
+    }
   }
 
   // Migrate data from the original single-list version of the app.
   let legacyItems: Item[] = [];
   try {
     const raw = localStorage.getItem(LEGACY_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(parsed)) legacyItems = parsed;
+    const legacy = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(legacy)) legacyItems = legacy;
   } catch {
     // ignore unreadable legacy data
   }
 
-  const first = createChecklist('My checklist');
-  first.items = legacyItems;
-  return { lists: [first], selectedId: first.id };
+  const categories = emptyCategories();
+  let selectedId: string | null = null;
+  if (legacyItems.length > 0) {
+    const first = createChecklist('My checklist');
+    first.items = legacyItems;
+    categories[0].lists.push(first);
+    selectedId = first.id;
+  }
+  return { categories, selectedId };
+}
+
+interface TreeChecklist extends Checklist {
+  children?: TreeChecklist[];
+}
+
+function flattenTree(lists: TreeChecklist[]): Checklist[] {
+  const flat: Checklist[] = [];
+  for (const list of lists) {
+    flat.push({ id: list.id, name: list.name, items: list.items ?? [] });
+    if (list.children?.length) flat.push(...flattenTree(list.children));
+  }
+  return flat;
 }
 
 export function saveState(state: AppState): void {
@@ -55,7 +101,7 @@ export function saveState(state: AppState): void {
 }
 
 export function createChecklist(name: string): Checklist {
-  return { id: crypto.randomUUID(), name, items: [], children: [] };
+  return { id: crypto.randomUUID(), name, items: [] };
 }
 
 export function createItem(text: string): Item {
@@ -67,24 +113,16 @@ export function createItem(text: string): Item {
   };
 }
 
-export function findChecklist(lists: Checklist[], id: string): Checklist | null {
-  for (const list of lists) {
-    if (list.id === id) return list;
-    const found = findChecklist(list.children, id);
+export function findChecklist(state: AppState, id: string): Checklist | null {
+  for (const category of state.categories) {
+    const found = category.lists.find((list) => list.id === id);
     if (found) return found;
   }
   return null;
 }
 
-export function removeChecklist(lists: Checklist[], id: string): boolean {
-  const index = lists.findIndex((list) => list.id === id);
-  if (index !== -1) {
-    lists.splice(index, 1);
-    return true;
+export function removeChecklist(state: AppState, id: string): void {
+  for (const category of state.categories) {
+    category.lists = category.lists.filter((list) => list.id !== id);
   }
-  return lists.some((list) => removeChecklist(list.children, id));
-}
-
-export function countDescendants(list: Checklist): number {
-  return list.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
 }

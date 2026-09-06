@@ -5,14 +5,14 @@ import {
   createItem,
   findChecklist,
   removeChecklist,
-  countDescendants,
+  type AppState,
+  type Category,
   type Checklist,
   type Item,
 } from './store';
 
 const sidebarToggle = document.getElementById('sidebar-toggle') as HTMLButtonElement;
-const addRootButton = document.getElementById('add-root-list') as HTMLButtonElement;
-const treeEl = document.getElementById('tree') as HTMLElement;
+const categoriesEl = document.getElementById('categories') as HTMLElement;
 const backdrop = document.getElementById('backdrop') as HTMLDivElement;
 const currentListName = document.getElementById('current-list-name') as HTMLHeadingElement;
 const form = document.getElementById('new-item-form') as HTMLFormElement;
@@ -23,11 +23,11 @@ const noListState = document.getElementById('no-list-state') as HTMLParagraphEle
 
 const mobileQuery = window.matchMedia('(max-width: 768px)');
 
-const state = loadState();
+const state: AppState = loadState();
 let renamingId: string | null = null;
 
 function selectedList(): Checklist | null {
-  return state.selectedId ? findChecklist(state.lists, state.selectedId) : null;
+  return state.selectedId ? findChecklist(state, state.selectedId) : null;
 }
 
 function persistAndRender(): void {
@@ -50,32 +50,58 @@ function closeMobileSidebar(): void {
   document.body.classList.remove('sidebar-open');
 }
 
-// --- Checklist tree ---
+// --- Sidebar categories ---
 
-function renderTree(): void {
-  treeEl.replaceChildren(buildTreeList(state.lists));
+function renderSidebar(): void {
+  categoriesEl.replaceChildren(...state.categories.map(buildCategorySection));
 }
 
-function buildTreeList(lists: Checklist[]): HTMLUListElement {
+function buildCategorySection(category: Category): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'category';
+
+  const header = document.createElement('div');
+  header.className = 'category-header';
+
+  const title = document.createElement('h2');
+  title.textContent = category.name;
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'category-add';
+  add.textContent = '＋';
+  add.title = `Add checklist to ${category.name}`;
+  add.setAttribute('aria-label', `Add checklist to ${category.name}`);
+  add.addEventListener('click', () => {
+    const list = createChecklist('New list');
+    category.lists.push(list);
+    state.selectedId = list.id;
+    renamingId = list.id;
+    persistAndRender();
+  });
+
+  header.append(title, add);
+
   const ul = document.createElement('ul');
-  ul.className = 'tree';
-  for (const list of lists) {
+  ul.className = 'list-group';
+  for (const list of category.lists) {
     const li = document.createElement('li');
-    li.append(renamingId === list.id ? buildRenameRow(list) : buildTreeRow(list));
-    if (list.children.length > 0) li.append(buildTreeList(list.children));
+    li.append(renamingId === list.id ? buildRenameRow(list) : buildListRow(list));
     ul.append(li);
   }
-  return ul;
+
+  section.append(header, ul);
+  return section;
 }
 
-function buildTreeRow(list: Checklist): HTMLDivElement {
+function buildListRow(list: Checklist): HTMLDivElement {
   const row = document.createElement('div');
-  row.className = 'tree-row';
+  row.className = 'list-row';
   row.classList.toggle('selected', list.id === state.selectedId);
 
   const name = document.createElement('button');
   name.type = 'button';
-  name.className = 'tree-name';
+  name.className = 'list-name';
   name.textContent = list.name;
   name.addEventListener('click', () => {
     state.selectedId = list.id;
@@ -83,29 +109,21 @@ function buildTreeRow(list: Checklist): HTMLDivElement {
     persistAndRender();
   });
 
-  const addChild = treeActionButton('＋', `Add sublist to "${list.name}"`, () => {
-    const child = createChecklist('New list');
-    list.children.push(child);
-    state.selectedId = child.id;
-    renamingId = child.id;
-    persistAndRender();
-  });
-
-  const rename = treeActionButton('✎', `Rename "${list.name}"`, () => {
+  const rename = listActionButton('✎', `Rename "${list.name}"`, () => {
     renamingId = list.id;
     render();
   });
 
-  const del = treeActionButton('×', `Delete "${list.name}"`, () => deleteList(list));
+  const del = listActionButton('×', `Delete "${list.name}"`, () => deleteList(list));
 
-  row.append(name, addChild, rename, del);
+  row.append(name, rename, del);
   return row;
 }
 
-function treeActionButton(text: string, label: string, onClick: () => void): HTMLButtonElement {
+function listActionButton(text: string, label: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'tree-action';
+  button.className = 'list-action';
   button.textContent = text;
   button.title = label;
   button.setAttribute('aria-label', label);
@@ -116,7 +134,7 @@ function treeActionButton(text: string, label: string, onClick: () => void): HTM
 function buildRenameRow(list: Checklist): HTMLInputElement {
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
-  nameInput.className = 'tree-rename';
+  nameInput.className = 'list-rename';
   nameInput.value = list.name;
   nameInput.setAttribute('aria-label', 'Checklist name');
 
@@ -143,14 +161,10 @@ function buildRenameRow(list: Checklist): HTMLInputElement {
 }
 
 function deleteList(list: Checklist): void {
-  const descendants = countDescendants(list);
-  if (list.items.length > 0 || descendants > 0) {
-    const detail = descendants > 0 ? ` and its ${descendants} sublist(s)` : '';
-    if (!window.confirm(`Delete "${list.name}"${detail}?`)) return;
-  }
-  removeChecklist(state.lists, list.id);
-  if (!selectedList()) {
-    state.selectedId = state.lists[0]?.id ?? null;
+  if (list.items.length > 0 && !window.confirm(`Delete "${list.name}"?`)) return;
+  removeChecklist(state, list.id);
+  if (state.selectedId === list.id) {
+    state.selectedId = state.categories.flatMap((c) => c.lists)[0]?.id ?? null;
   }
   persistAndRender();
 }
@@ -207,20 +221,12 @@ function renderItem(list: Checklist, item: Item): HTMLLIElement {
 // --- Wiring ---
 
 function render(): void {
-  renderTree();
+  renderSidebar();
   renderMain();
 }
 
 sidebarToggle.addEventListener('click', toggleSidebar);
 backdrop.addEventListener('click', closeMobileSidebar);
-
-addRootButton.addEventListener('click', () => {
-  const list = createChecklist('New list');
-  state.lists.push(list);
-  state.selectedId = list.id;
-  renamingId = list.id;
-  persistAndRender();
-});
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -232,7 +238,7 @@ form.addEventListener('submit', (event) => {
   persistAndRender();
 });
 
-if (!selectedList() && state.lists.length > 0) {
-  state.selectedId = state.lists[0].id;
+if (!selectedList()) {
+  state.selectedId = state.categories.flatMap((c) => c.lists)[0]?.id ?? null;
 }
 render();

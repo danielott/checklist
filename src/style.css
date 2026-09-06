@@ -135,16 +135,20 @@ body.sidebar-collapsed #sidebar {
   }
 }
 
-/* --- Sidebar tree --- */
+/* --- Sidebar categories --- */
 
-.sidebar-header {
+.category {
+  margin-bottom: 1.25rem;
+}
+
+.category-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 
-.sidebar-header h2 {
+.category-header h2 {
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -153,7 +157,7 @@ body.sidebar-collapsed #sidebar {
   padding-left: 0.4rem;
 }
 
-#add-root-list {
+.category-add {
   font-size: 1.1rem;
   line-height: 1;
   background: none;
@@ -164,32 +168,28 @@ body.sidebar-collapsed #sidebar {
   border-radius: 0.4rem;
 }
 
-#add-root-list:hover {
+.category-add:hover {
   background: var(--accent-soft);
 }
 
-.tree {
+.list-group {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.tree .tree {
-  padding-left: 1rem;
-}
-
-.tree-row {
+.list-row {
   display: flex;
   align-items: center;
   border-radius: 0.4rem;
   padding-right: 0.15rem;
 }
 
-.tree-row.selected {
+.list-row.selected {
   background: var(--accent-soft);
 }
 
-.tree-name {
+.list-name {
   flex: 1;
   min-width: 0;
   font: inherit;
@@ -205,12 +205,12 @@ body.sidebar-collapsed #sidebar {
   white-space: nowrap;
 }
 
-.tree-row.selected .tree-name {
+.list-row.selected .list-name {
   color: var(--accent);
   font-weight: 600;
 }
 
-.tree-action {
+.list-action {
   font-size: 0.95rem;
   line-height: 1;
   background: none;
@@ -223,25 +223,25 @@ body.sidebar-collapsed #sidebar {
   visibility: hidden;
 }
 
-.tree-row:hover .tree-action,
-.tree-row:focus-within .tree-action,
-.tree-row.selected .tree-action {
+.list-row:hover .list-action,
+.list-row:focus-within .list-action,
+.list-row.selected .list-action {
   visibility: visible;
 }
 
 /* Touch screens have no hover; keep actions visible. */
 @media (hover: none) {
-  .tree-action {
+  .list-action {
     visibility: visible;
   }
 }
 
-.tree-action:hover {
+.list-action:hover {
   color: var(--accent);
   background: var(--accent-soft);
 }
 
-.tree-rename {
+.list-rename {
   width: 100%;
   font: inherit;
   color: inherit;
