@@ -747,3 +747,12 @@ if (!selectedList()) {
   state.selectedId = state.categories.flatMap((c) => c.lists)[0]?.id ?? null;
 }
 render();
+
+// Only in production builds: the service worker would fight Vite's dev server.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Offline support is an enhancement; the app works without it.
+    });
+  });
+}
