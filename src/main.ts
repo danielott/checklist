@@ -330,16 +330,24 @@ function buildAddChildInput(item: Item): HTMLInputElement {
 
 // --- Drag and drop reordering ---
 
-interface FlatRow {
+const INDENT_REM = 1.5; // must match the nested <ul> padding in style.css
+
+interface ChainEntry {
   item: Item;
   siblings: Item[];
 }
 
-// All items in visual (depth-first) order, each with the array it lives in.
-function flattenItems(items: Item[], out: FlatRow[] = []): FlatRow[] {
+interface FlatRow extends ChainEntry {
+  depth: number;
+  chain: ChainEntry[]; // ancestors from root down to (and including) this item
+}
+
+// All items in visual (depth-first) order.
+function flattenItems(items: Item[], parents: ChainEntry[] = [], out: FlatRow[] = []): FlatRow[] {
   for (const item of items) {
-    out.push({ item, siblings: items });
-    flattenItems(item.children, out);
+    const chain = [...parents, { item, siblings: items }];
+    out.push({ item, siblings: items, depth: parents.length, chain });
+    flattenItems(item.children, chain, out);
   }
   return out;
 }
@@ -350,6 +358,8 @@ function collectIds(item: Item, out: Set<string>): void {
 }
 
 let draggingId: string | null = null;
+let dragStartX = 0;
+let dragStartDepth = 0;
 let indicatorLi: HTMLLIElement | null = null;
 
 function clearDropIndicator(): void {
@@ -358,37 +368,41 @@ function clearDropIndicator(): void {
 }
 
 function dropTargetLi(event: DragEvent): HTMLLIElement | null {
-  return (event.target as Element).closest?.('li[data-id]') ?? null;
+  return ((event.target as Element).closest?.('li[data-id]') as HTMLLIElement) ?? null;
 }
 
-function isBeforeRow(li: HTMLLIElement, clientY: number): boolean {
-  const rect = (li.firstElementChild as HTMLElement).getBoundingClientRect();
-  return clientY < rect.top + rect.height / 2;
+interface DropSpot {
+  li: HTMLLIElement | null;
+  liDepth: number;
+  before: boolean;
+  depth: number; // insertion depth chosen by the cursor's horizontal position
+  above: FlatRow | null; // row visually above the gap, outside the dragged subtree
 }
 
-function moveItem(list: Checklist, id: string, targetLi: HTMLLIElement | null, clientY: number): void {
+function computeDropSpot(list: Checklist, event: DragEvent): DropSpot | null {
   const rows = flattenItems(list.items);
-  const dragged = rows.find((r) => r.item.id === id);
-  if (!dragged) return;
-
+  const dragged = rows.find((r) => r.item.id === draggingId);
+  if (!dragged) return null;
   const subtree = new Set<string>();
   collectIds(dragged.item, subtree);
-  if (targetLi && subtree.has(targetLi.dataset.id!)) return; // can't drop into itself
 
+  const li = dropTargetLi(event);
   let gap: number; // insertion point between visual rows [gap-1] and [gap]
-  if (targetLi) {
-    const targetIndex = rows.findIndex((r) => r.item.id === targetLi.dataset.id);
-    if (targetIndex === -1) return;
-    gap = isBeforeRow(targetLi, clientY) ? targetIndex : targetIndex + 1;
+  let before = false;
+  let liDepth = 0;
+  if (li) {
+    const targetIndex = rows.findIndex((r) => r.item.id === li.dataset.id);
+    if (targetIndex === -1) return null;
+    liDepth = rows[targetIndex].depth;
+    const rect = (li.firstElementChild as HTMLElement).getBoundingClientRect();
+    // Only the top third of a row targets the gap above it; hovering the rest
+    // of the row targets the gap below, where nesting into the row is allowed.
+    before = event.clientY < rect.top + rect.height / 3;
+    gap = before ? targetIndex : targetIndex + 1;
   } else {
-    gap = rows.length; // dropped on empty space below the list
+    gap = rows.length; // hovering the empty space below the list
   }
 
-  // Dropping right next to the dragged row leaves everything as-is.
-  if (rows[gap]?.item.id === id || rows[gap - 1]?.item.id === id) return;
-
-  // The item visually above the drop point (skipping the dragged subtree)
-  // determines both position and depth: the moved item becomes its next sibling.
   let above: FlatRow | null = null;
   for (let i = gap - 1; i >= 0; i--) {
     if (!subtree.has(rows[i].item.id)) {
@@ -396,12 +410,37 @@ function moveItem(list: Checklist, id: string, targetLi: HTMLLIElement | null, c
       break;
     }
   }
+  let below: FlatRow | null = null;
+  for (let i = gap; i < rows.length; i++) {
+    if (!subtree.has(rows[i].item.id)) {
+      below = rows[i];
+      break;
+    }
+  }
 
+  // Valid depths at this gap: deep enough not to orphan the item below,
+  // at most one level deeper than the item above (its first child).
+  const maxDepth = above ? above.depth + 1 : 0;
+  const minDepth = below ? below.depth : 0;
+  // Depth follows how far the cursor moved horizontally since the drag began,
+  // starting from the item's original depth.
+  const indentPx = INDENT_REM * parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const cursorDepth = dragStartDepth + Math.round((event.clientX - dragStartX) / indentPx);
+  const depth = Math.min(Math.max(cursorDepth, minDepth), maxDepth);
+
+  return { li, liDepth, before, depth, above };
+}
+
+function moveItem(list: Checklist, dragged: FlatRow, spot: DropSpot): void {
   dragged.siblings.splice(dragged.siblings.indexOf(dragged.item), 1);
-  if (above) {
-    above.siblings.splice(above.siblings.indexOf(above.item) + 1, 0, dragged.item);
-  } else {
+  if (!spot.above) {
     list.items.unshift(dragged.item);
+  } else if (spot.depth > spot.above.depth) {
+    spot.above.item.children.unshift(dragged.item);
+  } else {
+    // Become the next sibling of the item-above's ancestor at the target depth.
+    const ancestor = spot.above.chain[spot.depth];
+    ancestor.siblings.splice(ancestor.siblings.indexOf(ancestor.item) + 1, 0, dragged.item);
   }
   persistAndRender();
 }
@@ -410,20 +449,28 @@ itemList.addEventListener('dragstart', (event) => {
   const li = dropTargetLi(event);
   if (!li || !event.dataTransfer) return;
   draggingId = li.dataset.id!;
+  dragStartX = event.clientX;
+  const list = selectedList();
+  dragStartDepth = list
+    ? (flattenItems(list.items).find((r) => r.item.id === draggingId)?.depth ?? 0)
+    : 0;
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/plain', draggingId);
   (li.firstElementChild as HTMLElement).classList.add('dragging');
 });
 
 itemList.addEventListener('dragover', (event) => {
-  if (!draggingId) return;
+  const list = selectedList();
+  if (!list || !draggingId) return;
   event.preventDefault();
   event.dataTransfer!.dropEffect = 'move';
-  const li = dropTargetLi(event);
   clearDropIndicator();
-  if (!li || li.dataset.id === draggingId) return;
-  li.classList.add(isBeforeRow(li, event.clientY) ? 'drop-before' : 'drop-after');
-  indicatorLi = li;
+  const spot = computeDropSpot(list, event);
+  if (!spot?.li) return;
+  const row = spot.li.firstElementChild as HTMLElement;
+  row.style.setProperty('--indent-delta', `${(spot.depth - spot.liDepth) * INDENT_REM}rem`);
+  spot.li.classList.add(spot.before ? 'drop-before' : 'drop-after');
+  indicatorLi = spot.li;
 });
 
 itemList.addEventListener('drop', (event) => {
@@ -431,8 +478,10 @@ itemList.addEventListener('drop', (event) => {
   clearDropIndicator();
   const list = selectedList();
   if (!list || !draggingId) return;
-  moveItem(list, draggingId, dropTargetLi(event), event.clientY);
+  const spot = computeDropSpot(list, event);
+  const dragged = flattenItems(list.items).find((r) => r.item.id === draggingId);
   draggingId = null;
+  if (spot && dragged) moveItem(list, dragged, spot);
 });
 
 itemList.addEventListener('dragend', () => {

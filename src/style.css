@@ -368,12 +368,30 @@ body.sidebar-collapsed #sidebar {
   opacity: 0.5;
 }
 
-li.drop-before > .item-row {
-  box-shadow: 0 -3px 0 0 var(--accent);
+.item-row {
+  position: relative;
 }
 
-li.drop-after > .item-row {
-  box-shadow: 0 3px 0 0 var(--accent);
+/* Drop indicator: a line in the gap above/below the row, shifted horizontally
+   by --indent-delta to preview the target nesting depth. */
+li.drop-before > .item-row::before,
+li.drop-after > .item-row::after {
+  content: '';
+  position: absolute;
+  left: var(--indent-delta, 0rem);
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+li.drop-before > .item-row::before {
+  top: -0.35rem;
+}
+
+li.drop-after > .item-row::after {
+  bottom: -0.35rem;
 }
 
 .item-row.checked span {
