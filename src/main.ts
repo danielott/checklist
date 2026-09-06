@@ -21,7 +21,6 @@ const input = document.getElementById('new-item-input') as HTMLInputElement;
 const outdentButton = document.getElementById('outdent-button') as HTMLButtonElement;
 const indentButton = document.getElementById('indent-button') as HTMLButtonElement;
 const itemList = document.getElementById('item-list') as HTMLUListElement;
-const emptyState = document.getElementById('empty-state') as HTMLParagraphElement;
 const noListState = document.getElementById('no-list-state') as HTMLParagraphElement;
 
 const mobileQuery = window.matchMedia('(max-width: 768px)');
@@ -33,6 +32,11 @@ let editingItemId: string | null = null;
 // Nesting level for the add-item form, relative to the list's root (0).
 // null means "same level as the item visually above the form".
 let addLevel: number | null = null;
+
+// Where the add-item form sits in the list: after the item with afterId
+// (null afterId = very top of the list). null means the default position,
+// pinned to the end of the list.
+let addPos: { afterId: string | null } | null = null;
 
 function selectedList(): Checklist | null {
   return state.selectedId ? findChecklist(state, state.selectedId) : null;
@@ -114,6 +118,7 @@ function buildListRow(list: Checklist): HTMLDivElement {
   name.addEventListener('click', () => {
     state.selectedId = list.id;
     addLevel = null;
+    addPos = null;
     closeMobileSidebar();
     persistAndRender();
   });
@@ -180,51 +185,88 @@ function deleteList(list: Checklist): void {
 
 // --- Items in the selected checklist ---
 
-// The chain of "last items" from the root down: the item visually above the
-// add form is the last element; each level of the chain is a valid parent
-// for the new item.
-function lastItemChain(list: Checklist): Item[] {
-  const chain: Item[] = [];
-  let items = list.items;
-  while (items.length > 0) {
-    const last = items[items.length - 1];
-    chain.push(last);
-    items = last.children;
-  }
-  return chain;
+// The add form occupies a gap in the list, described by the row visually
+// above it plus a nesting level, clamped to what is valid for that gap
+// (same rules as dropping a dragged item there).
+interface AddSpot {
+  above: FlatRow | null;
+  level: number;
+  minLevel: number;
+  maxLevel: number;
 }
 
-function currentAddLevel(list: Checklist): number {
-  const maxLevel = lastItemChain(list).length;
-  const defaultLevel = Math.max(0, maxLevel - 1);
-  return Math.min(Math.max(addLevel ?? defaultLevel, 0), maxLevel);
+function addSpot(list: Checklist): AddSpot {
+  const rows = flattenItems(list.items);
+  let above: FlatRow | null = null;
+  let below: FlatRow | null = null;
+  if (addPos === null) {
+    above = rows[rows.length - 1] ?? null; // pinned to the end of the list
+  } else if (addPos.afterId === null) {
+    below = rows[0] ?? null; // very top
+  } else {
+    above = rows.find((r) => r.item.id === addPos!.afterId) ?? null;
+    if (above) {
+      below = rows[rows.indexOf(above) + 1] ?? null;
+    } else {
+      // The item the form was anchored to is gone; fall back to the end.
+      addPos = null;
+      above = rows[rows.length - 1] ?? null;
+    }
+  }
+  const maxLevel = above ? above.depth + 1 : 0;
+  const minLevel = below ? below.depth : 0;
+  const level = Math.min(Math.max(addLevel ?? (above ? above.depth : 0), minLevel), maxLevel);
+  return { above, level, minLevel, maxLevel };
 }
 
 function changeAddLevel(delta: number): void {
   const list = selectedList();
   if (!list) return;
-  addLevel = currentAddLevel(list) + delta;
+  addLevel = addSpot(list).level + delta;
   renderMain();
   input.focus();
+}
+
+// Insert the form (wrapped in an <li>) into the item tree at its spot.
+function placeAddForm(list: Checklist): void {
+  const spot = addSpot(list);
+  const formLi = document.createElement('li');
+  formLi.className = 'form-li';
+  form.hidden = false;
+  formLi.append(form);
+
+  if (!spot.above) {
+    itemList.prepend(formLi);
+  } else if (spot.level > spot.above.depth) {
+    // First child of the item above.
+    const parentLi = itemList.querySelector(`li[data-id="${spot.above.item.id}"]`)!;
+    let ul = parentLi.querySelector(':scope > ul');
+    if (!ul) {
+      ul = document.createElement('ul');
+      parentLi.append(ul);
+    }
+    ul.prepend(formLi);
+  } else {
+    // Next sibling of the item-above's ancestor at the form's level.
+    const ancestor = spot.above.chain[spot.level];
+    const ancestorLi = itemList.querySelector(`li[data-id="${ancestor.item.id}"]`)!;
+    ancestorLi.after(formLi);
+  }
+
+  outdentButton.disabled = spot.level <= spot.minLevel;
+  indentButton.disabled = spot.level >= spot.maxLevel;
 }
 
 function renderMain(): void {
   const list = selectedList();
   currentListName.textContent = list ? list.name : 'Checklist';
-  form.hidden = !list;
   noListState.hidden = !!list;
   if (!list) {
     itemList.replaceChildren();
-    emptyState.hidden = true;
     return;
   }
   itemList.replaceChildren(...list.items.map((item) => renderItem(list.items, item)));
-  emptyState.hidden = list.items.length > 0;
-
-  const level = currentAddLevel(list);
-  form.style.marginLeft = `${level * 1.5}rem`;
-  outdentButton.disabled = level === 0;
-  indentButton.disabled = level >= lastItemChain(list).length;
+  placeAddForm(list);
 }
 
 function renderItem(siblings: Item[], item: Item): HTMLLIElement {
@@ -354,6 +396,7 @@ function collectIds(item: Item, out: Set<string>): void {
 }
 
 let draggingId: string | null = null;
+let draggingForm = false;
 let dragStartX = 0;
 let dragStartDepth = 0;
 let indicatorLi: HTMLLIElement | null = null;
@@ -382,10 +425,13 @@ function computeDropSpot(
   clientY: number,
 ): DropSpot | null {
   const rows = flattenItems(list.items);
-  const dragged = rows.find((r) => r.item.id === draggingId);
-  if (!dragged) return null;
   const subtree = new Set<string>();
-  collectIds(dragged.item, subtree);
+  if (draggingId) {
+    // Dragging an item: its subtree moves with it, so ignore those rows.
+    const dragged = rows.find((r) => r.item.id === draggingId);
+    if (!dragged) return null;
+    collectIds(dragged.item, subtree);
+  }
 
   let gap: number; // insertion point between visual rows [gap-1] and [gap]
   let before = false;
@@ -464,20 +510,45 @@ function showDropIndicator(spot: DropSpot): void {
   indicatorLi = spot.li;
 }
 
+function beginFormDrag(list: Checklist, startX: number): void {
+  draggingForm = true;
+  dragStartX = startX;
+  dragStartDepth = addSpot(list).level;
+  form.classList.add('dragging');
+}
+
 function finishDrag(spot: DropSpot | null): void {
   clearDropIndicator();
   const list = selectedList();
-  if (list && draggingId && spot) {
-    const dragged = flattenItems(list.items).find((r) => r.item.id === draggingId);
-    if (dragged) moveItem(list, dragged, spot);
+  if (list && spot) {
+    if (draggingId) {
+      const dragged = flattenItems(list.items).find((r) => r.item.id === draggingId);
+      if (dragged) moveItem(list, dragged, spot);
+    } else if (draggingForm) {
+      // Re-anchor the add form to the gap it was dropped in.
+      addPos = { afterId: spot.above?.item.id ?? null };
+      addLevel = spot.depth;
+      render();
+      input.focus();
+    }
   }
   draggingId = null;
+  draggingForm = false;
+  form.classList.remove('dragging');
   itemList.querySelector('.dragging')?.classList.remove('dragging');
 }
 
 // Desktop: native HTML5 drag and drop.
 
 itemList.addEventListener('dragstart', (event) => {
+  if ((event.target as Element).closest?.('#new-item-form')) {
+    const list = selectedList();
+    if (!list || !event.dataTransfer) return;
+    beginFormDrag(list, event.clientX);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', 'add-form');
+    return;
+  }
   const li = dropTargetLi(event);
   if (!li || !event.dataTransfer) return;
   beginDrag(li, event.clientX);
@@ -487,7 +558,7 @@ itemList.addEventListener('dragstart', (event) => {
 
 itemList.addEventListener('dragover', (event) => {
   const list = selectedList();
-  if (!list || !draggingId) return;
+  if (!list || (!draggingId && !draggingForm)) return;
   event.preventDefault();
   event.dataTransfer!.dropEffect = 'move';
   const spot = computeDropSpot(list, dropTargetLi(event), event.clientX, event.clientY);
@@ -498,12 +569,14 @@ itemList.addEventListener('dragover', (event) => {
 itemList.addEventListener('drop', (event) => {
   event.preventDefault();
   const list = selectedList();
-  if (!list || !draggingId) return;
+  if (!list || (!draggingId && !draggingForm)) return;
   finishDrag(computeDropSpot(list, dropTargetLi(event), event.clientX, event.clientY));
 });
 
 itemList.addEventListener('dragend', () => {
   draggingId = null;
+  draggingForm = false;
+  form.classList.remove('dragging');
   clearDropIndicator();
   itemList.querySelector('.dragging')?.classList.remove('dragging');
 });
@@ -529,6 +602,8 @@ function cancelTouchDrag(): void {
     touchDragging = false;
     touchSpot = null;
     draggingId = null;
+    draggingForm = false;
+    form.classList.remove('dragging');
     clearDropIndicator();
     itemList.querySelector('.dragging')?.classList.remove('dragging');
   }
@@ -539,6 +614,23 @@ itemList.addEventListener(
   (event) => {
     if (event.touches.length !== 1) return;
     const target = event.target as Element;
+    if (target.closest?.('#new-item-form')) {
+      // Long-press the add box itself to move it; buttons still just click.
+      if (target.closest('button')) return;
+      const list = selectedList();
+      if (!list) return;
+      const touch = event.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchTimer = window.setTimeout(() => {
+        touchTimer = null;
+        touchDragging = true;
+        touchSpot = null;
+        beginFormDrag(list, touchStartX);
+        navigator.vibrate?.(10);
+      }, LONG_PRESS_MS);
+      return;
+    }
     if (target.closest?.('input, button')) return;
     const li = target.closest?.('li[data-id]') as HTMLLIElement | null;
     if (!li) return;
@@ -613,13 +705,22 @@ form.addEventListener('submit', (event) => {
   const list = selectedList();
   const text = input.value.trim();
   if (!list || !text) return;
-  const level = currentAddLevel(list);
-  const chain = lastItemChain(list);
-  const siblings = level === 0 ? list.items : chain[level - 1].children;
-  siblings.push(createItem(text));
-  addLevel = level;
+  const spot = addSpot(list);
+  const item = createItem(text);
+  if (!spot.above) {
+    list.items.unshift(item);
+  } else if (spot.level > spot.above.depth) {
+    spot.above.item.children.unshift(item);
+  } else {
+    const ancestor = spot.above.chain[spot.level];
+    ancestor.siblings.splice(ancestor.siblings.indexOf(ancestor.item) + 1, 0, item);
+  }
+  // Keep the form right below what was just added (unless pinned to the end).
+  if (addPos !== null) addPos = { afterId: item.id };
+  addLevel = spot.level;
   input.value = '';
   persistAndRender();
+  input.focus();
 });
 
 outdentButton.addEventListener('click', () => changeAddLevel(-1));

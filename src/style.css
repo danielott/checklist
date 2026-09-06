@@ -256,10 +256,13 @@ body.sidebar-collapsed #sidebar {
 
 #new-item-form {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
-  margin-top: 0.75rem;
   position: relative;
-  transition: margin-left 0.15s ease;
+}
+
+#new-item-form.dragging {
+  opacity: 0.5;
 }
 
 /* The chevrons hang to the left of the form so the input's left edge lines
